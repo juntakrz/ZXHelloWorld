@@ -1,0 +1,22 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ZX Spectrum: Assemble",
+      "type": "shell",
+      "command": "sjasmplus",
+      "args": [
+        "--fullpath",
+        "--sym=build/main.sym",
+        "--lst=build/main.lst",
+        "--sld=build/main.sld",
+        "src/main.asm"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

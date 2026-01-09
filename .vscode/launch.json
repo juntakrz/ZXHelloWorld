@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+        {
+            "type": "dezog",
+            "request": "launch",
+            "preLaunchTask": "ZX Spectrum: Assemble",
+            "name": "ZX Spectrum: Debug",
+            "remoteType": "zsim",
+            "zsim": {
+                "preset": "spectrum",
+                "memoryModel": "ZX48K",
+                "visualMemory": true,
+                "zxKeyboard": "spectrum",
+                "ulaScreen": "spectrum",
+            },
+            "sjasmplus": [
+               {
+                   "path": "build/main.sld",
+                }
+            ],
+            "startAutomatically": false,
+            "history": {
+                "reverseDebugInstructionCount": 10000,
+                "codeCoverageEnabled": true
+            },
+            "commandsAfterLaunch": [
+                //"-sprites",
+                //"-patterns"
+            ],
+            "disassemblerArgs": {
+                "numberOfLines": 20
+            },
+            "smartDisassemblerArgs": {
+                "lowerCase": false
+            },
+            "rootFolder": "${workspaceFolder}",
+            "load": "build/ZXHelloWorld.sna",
+            "smallValuesMaximum": 513,
+            "tmpDir": ".tmp"
+        }
+    ]
+}
