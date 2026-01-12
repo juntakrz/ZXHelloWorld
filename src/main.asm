@@ -7,8 +7,6 @@
 
 main:
 	ld sp, addrStack		; Set stack pointer to the address of 65520
-	ld a, 2					; Set screen channel
-	call zxChOutput			; Open channel output
 	call createCustomFont
 	ld b, 0
 	ld c, 10
@@ -22,8 +20,8 @@ main:
 ; OUT: 0, IN: 0
 createCustomFont:
 	ld hl, zxAddrFontData	; Address of system font
-	LD de, addrFont 		; address of new font
-	LD bc, addrFont_end - addrFont
+	ld de, addrFont 		; address of new font
+	ld bc, addrFont_end - addrFont
 __createCustomFont_loop:
 	ld a, (hl)
 	rra						; Shift text graphics bits right and OR them to make the font fatter
@@ -198,10 +196,10 @@ getCharAttribAddr:
 ; A: 0 = screen address only, 1 = attribute address only, 2+ = both
 getCharAddrs:
 	cp 0
-	jr z, __getCharAddrs_screenAddr
+	jr z, __getCharAddrs_screenAddr		; 0 - screen only address, skip attributes
 	call getCharAttribAddr
 	cp 1
-	jr z, __getCharAddrs_return
+	jr z, __getCharAddrs_return			; 1 - attribute only address, skip screen address
 	ld de, hl
 
 __getCharAddrs_screenAddr:
@@ -264,7 +262,7 @@ addrFont:		equ 0xF8F0	; Custom font address
 addrFont_end:	equ 0xFBF0
 
 addrStack:		equ 0xFFF0
-addrStack_end: 	equ	0xFDF0	; Arbitrary targeted stack size limit of 512 bytes
+addrStack_end: 	equ	0xFBF0	; Arbitrary targeted stack size limit of 1024 bytes
 
 	savetap "build/ZXHelloWorld.tap", main
 	savesna "build/ZXHelloWorld.sna", main
