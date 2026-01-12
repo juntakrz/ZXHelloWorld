@@ -1,20 +1,48 @@
 ; LEGEND:
 ; OUT: ... , IN: ...  - What subroutine outputs and what it expects to receive in registers or a stack
-; r - the input register value is preserved after the subroutine returns, r* - the register value will be changed
+; R: ... - this registers will be changed by this function, register A is always expected to be changed
 
 	device ZXSPECTRUM48
 	org 0x6000
 
 main:
-	ld sp, 0xFFF0			; Set stack pointer to the address of 65520
+	ld sp, addrStack		; Set stack pointer to the address of 65520
 	ld a, 2					; Set screen channel
-	call 0x1601				; Open channel output
-	ld hl, strHello			; char* message
-	ld b, 1					; bool newLine
+	call zxChOutput			; Open channel output
+	call createCustomFont
+	ld b, 0
+	ld c, 10
+	call getCharScreenAddr	; Will return a screen address in HL for row (B) = 0, column (C) = 10
+	ld de, strHello			; Pointer to the array of characters/string
 	call printStr
 	call drawDiamonds
 	;ret					; Return to BASIC
 	jr $					; Infinite loop for the virtual debugging
+
+; OUT: 0, IN: 0
+createCustomFont:
+	ld hl, zxAddrFontData	; Address of system font
+	LD de, addrFont 		; address of new font
+	LD bc, addrFont_end - addrFont
+__createCustomFont_loop:
+	ld a, (hl)
+	rra						; Shift text graphics bits right and OR them to make the font fatter
+	or (hl)					; A classic in ZX Spectrum software!
+	ld (de), a
+	inc hl
+	inc de
+	dec bc
+	ld a, b					; If both B and C reached zero = Z flag will be marked using OR
+	or c					; As A will be zero
+	jr nz, __createCustomFont_loop
+
+	; Change the system variable to point to the new font
+	; Spectrum expects the pointer to the start of the ASCII table, which is just 32 symbols earlier
+	; These symbols are "special" and are used in system calls, won't be needed by the custom text graphics drawing
+	ld hl, addrFont - 0x100
+	ld (zxAddrFontPtr), hl
+
+	ret
 
 ; OUT: 0, IN: 0
 drawDiamonds:
@@ -28,6 +56,11 @@ __drawDiamonds_memInitLoop:
 	ld c, a
 	sla c
 	sla c
+	ld d, a					; Push and pop value in A, which should preserve the index into the memory address array
+	ld a, c
+	add a, 3				; Adding + 3 to the column's value
+	ld c, a
+	ld a, d
 	call storeCharAddrs
 	exx						; Use page 0 registers
 	djnz __drawDiamonds_memInitLoop
@@ -63,26 +96,11 @@ __drawDiamonds_drawLoop
 	
 	ret
 
-; OUT: 0, IN: pString (HL), bAddNewLine (B)
-printStr:
-	ld a, (hl)
-	cp 0
-	jr z, __printStr_return
-	rst 0x10
-	inc hl
-	jr printStr
-__printStr_newLine:
-	ld a, 0x0D
-	rst 0x10
-	ret
-__printStr_return:
-	ld a, b					; If a new line is requested - "print" a carriage return character
-	cp 1
-	jr z, __printStr_newLine
+;
+; GROUP: Grid-based draw / print
+;
 
-	ret
-
-; OUT: 0, IN: pScreenAddress (HL), pTileAddress (DE)
+; OUT: 0, IN: pScreenAddress (HL), pTileAddress (DE), R: DE, HL
 drawTile:
 	ld b, 8					; Tile is 8 bytes or 8x8 pixels
 __drawTileLoop:
@@ -94,7 +112,45 @@ __drawTileLoop:
 
 	ret
 
-; OUT: pScreenAddress (HL), IN: row (B*), column (C*)
+; OUT: 0, IN: char (A), pScreenAddr (HL), R: BC, DE, HL
+printChar:
+	; Store an address in the custom font table into DE
+	sub 0x20				; Make the printable chars (start with space at value 32) have a base value of 0
+	ex de, hl				; Store screen address in DE
+	ld h, 0
+	ld l, a
+	add hl, hl				; Calculate a 16 bit offset into the custom font table: (char value - 32) * 8
+	add hl, hl
+	add hl, hl
+	ld bc, addrFont
+	add hl, bc				; Add custom font's base address to the offset
+	ex de, hl				; Swap the result into DE, while restoring screen address to HL
+
+	; Print character graphics, value in HL is used by this
+	call drawTile
+
+	ret
+
+; OUT: 0, IN: pScreenAddr (HL), pString (DE), R: DE, HL
+printStr:
+	; Any string provided must end with 0 to exit this function
+	ld a, (de)
+	cp 0
+	jr z, __printStr_return
+
+	; Print character, preserving pointers to move them to the next character/screen address
+	push de
+	push hl
+	call printChar
+	pop hl
+	pop de
+	inc hl
+	inc de
+	jr printStr
+__printStr_return:
+	ret
+
+; OUT: pScreenAddress (HL), IN: row (B), column (C), R: BC, HL
 getCharScreenAddr:
 	; Get block row offset, (row % 8) * 32 + column
 	ld a, b					; Get the original row index
@@ -119,7 +175,7 @@ getCharScreenAddr:
 
 	ret
 
-; OUT: pAttributeAddress (HL), IN: row (B), column (C)
+; OUT: pAttributeAddress (HL), IN: row (B), column (C), R: HL
 getCharAttribAddr:
 	ld h, 0
 	ld l, b
@@ -137,9 +193,9 @@ getCharAttribAddr:
 
 	ret
 
-; OUT: pScreenAddr (HL), pAttributeAddr (DE), IN: getMode (A*), row (B*), column (C*)
-; A == 1: OUT: pAttributeAddr(DE), IN: getMode (A*), row (B), column (C)
-; A: 0 = screen address only, 1 = attribute address only, other = both
+; OUT: pScreenAddr (HL), pAttributeAddr (DE), IN: getMode (A), row (B), column (C), R: BC, DE, HL
+; A == 1: OUT: pAttributeAddr(DE), IN: getMode (A), row (B), column (C), R: HL
+; A: 0 = screen address only, 1 = attribute address only, 2+ = both
 getCharAddrs:
 	cp 0
 	jr z, __getCharAddrs_screenAddr
@@ -153,6 +209,10 @@ __getCharAddrs_screenAddr:
 
 __getCharAddrs_return:
 	ret
+
+;
+; END: grid based draw / print
+;
 
 ; OUT: 0, IN: memory index (A), row (B), column (C)
 storeCharAddrs:
@@ -186,8 +246,25 @@ strHello:
 artDiamond:
 	db 0x18, 0x3C, 0x7E, 0xFF, 0xFF, 0x7E, 0x3C, 0x18	; 8x8 diamond
 
-addrScreen:
+; ZX Spectrum ROM routines and data
+zxChOutput: 	equ 0x1601
+
+zxPrint:		equ 0x230C
+
+zxAddrFontData:	equ 0x3D00
+
+zxAddrFontPtr:	equ 0x5C36
+
+; Custom addresses
+addrScreen:		equ 0xF8B0
 	ds 0x40		; char[64]8x8
+
+addrFont:		equ 0xF8F0	; Custom font address
+	ds 0x300	; Printed symbols have a count of 96, which at 8 bytes per symbol equals 768 bytes
+addrFont_end:	equ 0xFBF0
+
+addrStack:		equ 0xFFF0
+addrStack_end: 	equ	0xFDF0	; Arbitrary targeted stack size limit of 512 bytes
 
 	savetap "build/ZXHelloWorld.tap", main
 	savesna "build/ZXHelloWorld.sna", main
