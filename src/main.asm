@@ -3,7 +3,15 @@
 ; R: ... - this registers will be changed by this function, register A is always expected to be changed
 
 	device ZXSPECTRUM48
-	org 0x6000
+
+; RAM allocations
+	org 0xF800
+addrFont
+	ds 0x300		; Accounting for 96 printable characters, at 8 bytes per character, requires 768 bytes
+addrFont_end		; 0xF800 .. 0xFAFF
+
+; Program
+	org 0x8000
 
 main:
 	ld sp, addrStack		; Set stack pointer to the address of 65520
@@ -138,7 +146,7 @@ __createCustomFont_loop:
 ; BEGIN PRINT SUBROUTINES
 ;
 
-; OUT: 0, IN: char (A), pScreenAddr (HL), R: BC, DE, HL
+; OUT: 0, IN: char (A), pScreenAddr (HL), R: BC (drawTile), DE, HL
 printChar:
 	; Store an address in the custom font table into DE
 	sub 0x20					; Make the printable chars (start with space at value 32) have a base value of 0
@@ -148,27 +156,26 @@ printChar:
 	add hl, hl					; Calculate a 16 bit offset into the custom font table: (char value - 32) * 8
 	add hl, hl
 	add hl, hl
-	ld bc, addrFont
-	add hl, bc					; Add custom font's base address to the offset
+	ld a, h
+	add a, HIGH addrFont		; Add the MSB of the custom font address, as LSB is defined as 0
+	ld h, a
 	ex de, hl					; Swap the result into DE, while restoring screen address to HL
 
-	; Print character graphics, value in HL is used by this
+	; Print character graphics, values in DE and HL are used and modified by this subroutine
 	call drawTile
 
 	ret
 
-; OUT: 0, IN: pScreenAddr (HL), pString (DE), R: BC (printChar), DE, HL
+; OUT: 0, IN: pScreenAddr (HL), pString (DE), R: BC (drawTile), DE, HL
 printStr:
 	; Any string provided must end with 0 to exit this function
 	ld a, (de)
 	cp 0
 	jr z, __printStr_return
 
-	; Print character, preserving pointers to move them to the next character/screen address
+	; Print character, DE and HL are pushed onto the stack because drawTile will modify them
 	push de
-	push hl
 	call printChar
-	pop hl
 	pop de
 	inc hl
 	inc de
@@ -184,7 +191,7 @@ __printStr_return:
 ; BEGIN GRAPHICS SUBROUTINES
 ;
 
-; OUT: 0, IN: pScreenAddress (HL), pTileAddress (DE), R: DE, HL
+; OUT: 0, IN: pScreenAddress (HL), pTileAddress (DE), R: BC, DE
 drawTile:
 	ld b, 8						; Tile is 8 bytes or 8x8 pixels
 __drawTileLoop:
@@ -193,6 +200,9 @@ __drawTileLoop:
 	inc de						; Move tile pointer forward by 1 byte
 	inc h						; Move screen pointer to the next bit row (offset 256 bytes, see ZX screen memory structure)
 	djnz __drawTileLoop
+	ld a, h						; Restore HL to its previous value
+	sub 8						; This is faster than preserving HL with PUSH and POP (15 vs 21 cycles)
+	ld h, a
 
 	ret
 
@@ -309,11 +319,6 @@ zxPrint:			equ 0x230C
 zxAddrFontData:		equ 0x3D00
 
 zxAddrFontPtr:		equ 0x5C36
-
-; Custom addresses
-addrFont:			; Custom font address
-	ds 0x300		; Printed symbols have a count of 96, which at 8 bytes per symbol equals 768 bytes
-addrFont_end
 
 addrStack:			equ 0xFFF0
 addrStack_end: 		equ	0xFBF0	; Arbitrary targeted stack size limit of 1024 bytes
