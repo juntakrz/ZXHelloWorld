@@ -17,7 +17,6 @@ main:
 
 setup:
 	call createCustomFont
-	call setScreenGridPointers
 
 	ret
 
@@ -49,6 +48,7 @@ demo:
 	ld b, 0						; This is also a Loop index 0 = 0 as it propagates safely through the loops
 	ld c, 8
 	call getAttribCellPtr
+	xor a						; Reset A to 0
 __demo_colourLoop
 	cpl
 	add 8						; Paper color = 7 - ink color
@@ -130,28 +130,6 @@ __createCustomFont_loop:
 	ld (zxAddrFontPtr), hl
 
 	ret
-
-; OUT: 0, IN: 0, R: BC, DE, HL
-setScreenGridPointers:
-	ld de, addrScreenRowPtrs
-	ld a, 0
-__setScreenGridPointers_loop:
-	push af						; Preserve A value on top of the stack
-	ld b, a
-	call calcScreenCellAddr
-	pop af
-	ex de, hl					; Move screen cell address into DE and array address into HL
-	ld (hl), e					; Store LSB of the screen cell address
-	inc hl						; Advance HL to next address byte (MSB)
-	ld (hl), d					; Store MSB of the screen cell address
-	inc hl						; Advance HL to the next array member
-	ex de, hl					; Swap DE and HL back
-	inc a
-	cp 24
-	jr nz, __setScreenGridPointers_loop
-
-	ret
-
 ;
 ; END INIT SUBROUTINES
 ;
@@ -277,23 +255,26 @@ setCellFlash:
 ; BEGIN GRAPHICS MEMORY SUBROUTINES
 ;
 
-; OUT: HL, IN: row (B), column (C), R: BC, DE, HL
-; Address = rowAddressMSB + column
+; OUT: pScreenAddress (HL), IN: row (B), column (C), R: HL
 getScreenCellPtr:
-	ld de, addrScreenRowPtrs
-	sla b
-	ld h, 0
-	ld l, b
-	add hl, de
-	ld a, (hl)					; Load LSB of a row address
-	add a, c					; Add column offset to it
-	inc hl						; Move the pointer to the MSB of a row address
-	ld h, (hl)					; Load it into the MSB of the output address
-	ld l, a						; Load precalculated LSB as well
+	; Get block row offset, (row % 8) * 32 + column
+	ld a, b						; Get the original row index
+	and %00000111
+	rrca						; Bit shift of (a << n) is equal to a * (2^n)
+	rrca						; Or bit rotation (a >> 8 - n) if n > 4 to save cycles
+	rrca						; a * 32 (0 .. 224)
+	or c						; Add column index (0 .. 31) which OR nicely into empty bits
+	ld l, a
+
+	; Get block offset and store it in an MSB, each screen block is 2048 bytes or (a * 256) << 3
+	ld a, b
+	and %00011000				; Each screen block is 2048 bytes, using this mask is effectively row / 8 * 2048
+	or 0x40						; Because this byte is treated as MSB of address, adding 0x40 for the final address
+	ld h, a						; Combine MSB and LSB for the final address
 
 	ret
 
-; OUT: pAttributeAddress (HL), IN: row (B), column (C), R: DE, HL
+; OUT: pAttributeAddress (HL), IN: row (B), column (C), R: HL
 getAttribCellPtr:
 	ld h, 0
 	ld l, b
@@ -302,35 +283,12 @@ getAttribCellPtr:
 	add hl, hl
 	add hl, hl
 	add hl, hl					; Row index * 32
-	ld d, 0x58					; Attribute base address is 0x5800
-	ld e, c						; Add column offset (0..31) to it, which will safely fit into the free 5 bits of current HL
-	add hl, de					; Get the final attribute cell address
-
-	ret
-
-; OUT: pScreenAddress (HL), IN: row (B), column (C), R: HL
-calcScreenCellAddr:
-	; Get block row offset, (row % 8) * 32 + column
-	ld a, b						; Get the original row index
-	and 7
-	sla a						; Bitshift of (a << n) is equal to a * (2^n)
-	sla a
-	sla a
-	sla a
-	sla a						; a * 32 (0 .. 224 bytes)
-	add a, c					; Add column index (0 .. 31)
-	ld l, a
-
-	; Get block offset and store it in an MSB, each screen block is 2048 bytes or (a * 256) << 3
-	ld a, b
-	srl a						; Bitshift of (b >> n) is equal to b / (2^n)
-	srl a
-	srl a						; b / 8 and treat the result of B as if it was multiplied by 256, e.g. it's MSB
-	sla a
-	sla a
-	sla a						; b * 2048
-	add a, 0x40					; Screen bits start at 0x4000
-	ld h, a						; Combine MSB and LSB for the final address
+	ld a, h
+	or 0x58						; Attribute base address is 0x5800
+	ld h, a
+	ld a, l
+	or c						; Add column offset (0..31) to it, which will safely fit into the free 5 bits of current HL
+	ld l, a						; Get the final attribute cell address
 
 	ret
 ;
@@ -353,10 +311,6 @@ zxAddrFontData:		equ 0x3D00
 zxAddrFontPtr:		equ 0x5C36
 
 ; Custom addresses
-addrScreenRowPtrs:	equ 0xF000
-	ds 0x30			; Pointers to the top left pixel of each row, column offsets are linear, so easy to add later
-addrScreenRowPtrs_end
-
 addrFont:			; Custom font address
 	ds 0x300		; Printed symbols have a count of 96, which at 8 bytes per symbol equals 768 bytes
 addrFont_end
@@ -365,22 +319,22 @@ addrStack:			equ 0xFFF0
 addrStack_end: 		equ	0xFBF0	; Arbitrary targeted stack size limit of 1024 bytes
 
 colors:
-INK_BLACK			equ 0
-INK_BLUE			equ 1
-INK_RED				equ 2
-INK_MAGENTA			equ 3
-INK_GREEN			equ 4
-INK_CYAN			equ 5
-INK_YELLOW			equ 6
-INK_WHITE			equ 7
+BLACK				equ 0
+BLUE				equ 1
+RED					equ 2
+MAGENTA				equ 3
+GREEN				equ 4
+CYAN				equ 5
+YELLOW				equ 6
+WHITE				equ 7
 PAPER_BLACK			equ 0
-PAPER_BLUE			equ INK_BLUE << 3
-PAPER_RED			equ INK_RED << 3
-PAPER_MAGENTA		equ INK_MAGENTA << 3
-PAPER_GREEN			equ INK_GREEN << 3
-PAPER_CYAN			equ INK_CYAN << 3
-PAPER_YELLOW		equ INK_YELLOW << 3
-PAPER_WHITE			equ INK_WHITE << 3
+PAPER_BLUE			equ BLUE << 3
+PAPER_RED			equ RED << 3
+PAPER_MAGENTA		equ MAGENTA << 3
+PAPER_GREEN			equ GREEN << 3
+PAPER_CYAN			equ CYAN << 3
+PAPER_YELLOW		equ YELLOW << 3
+PAPER_WHITE			equ WHITE << 3
 CELL_BRIGHT			equ 1 << 6
 CELL_FLASH			equ 1 << 7
 
