@@ -286,19 +286,21 @@ getScreenCellPtr:
 
 ; OUT: pAttributeAddress (HL), IN: row (B), column (C), R: HL
 getAttribCellPtr:
-	ld h, 0
-	ld l, b
-	add hl, hl					; Each addition of the same registry with its previous result stored is equal to HL * 2^n
-	add hl, hl
-	add hl, hl
-	add hl, hl
-	add hl, hl					; Row index * 32
-	ld a, h
-	or 0x58						; Attribute base address is 0x5800
+	ld a, b						; Calculate address MSB
+	and %00011000
+	rra
+	rra
+	rra
+	add a, 0x58
 	ld h, a
-	ld a, l
-	or c						; Add column offset (0..31) to it, which will safely fit into the free 5 bits of current HL
-	ld l, a						; Get the final attribute cell address
+	
+	ld a, b						; Calculate address LSB
+	and %00000111
+	rrca
+	rrca
+	rrca
+	or c
+	ld l, a
 
 	ret
 ;
